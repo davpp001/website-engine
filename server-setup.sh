@@ -64,13 +64,38 @@ git clone "$REPO_URL" temp-repo
 
 # Copy with the new directory names
 echo "📋 Copying files to correct locations..."
-cp -r temp-repo/website-engine-infra-scripts/* /opt/infra-scripts/
+# Check which directory structure exists
+if [ -d "temp-repo/infra-scripts" ]; then
+  cp -r temp-repo/infra-scripts/* /opt/infra-scripts/
+else
+  cp -r temp-repo/website-engine-infra-scripts/* /opt/infra-scripts/
+fi
 cp -r temp-repo/infra-playbooks/* /opt/infra-playbooks/
 rm -rf temp-repo
 
 # 7. Set up symlinks for all commands
 echo "🔗 Setting up command symlinks..."
-bash /opt/infra-scripts/setup-symlinks.sh
+# Create symlinks for WordPress tools
+ln -sf "/opt/infra-scripts/wordpress/install_wp.sh" /usr/local/bin/install_wp
+ln -sf "/opt/infra-scripts/wordpress/uninstall_wp.sh" /usr/local/bin/uninstall_wp
+ln -sf "/opt/infra-scripts/wordpress/setup_wp.sh" /usr/local/bin/setup_wp
+ln -sf "/opt/infra-scripts/wordpress/cleanup_wp.sh" /usr/local/bin/cleanup_wp
+
+# Create symlinks for Cloudflare tools
+ln -sf "/opt/infra-scripts/cloudflare/create_cf_sub_auto.sh" /usr/local/bin/create_cf_sub_auto
+ln -sf "/opt/infra-scripts/cloudflare/delete_cf_sub.sh" /usr/local/bin/delete_cf_sub
+
+# Make all scripts executable
+chmod +x /opt/infra-scripts/wordpress/*.sh
+chmod +x /opt/infra-scripts/cloudflare/*.sh
+
+# Create pullinfra command
+cat > /usr/local/bin/pullinfra << 'EOF'
+#!/bin/bash
+cd /opt/infra-scripts && git pull origin main
+cd /opt/infra-playbooks && git pull origin main
+EOF
+chmod +x /usr/local/bin/pullinfra
 
 # 8. Set up Cloudflare credentials (user needs to edit this file)
 echo "☁️ Creating Cloudflare configuration file..."

@@ -1,0 +1,62 @@
+# roles/website-scripts/tasks/main.yml
+- name: Ensure directories exist
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - /opt/infra-scripts
+    - /opt/infra-playbooks
+
+- name: Deploy WordPress installation scripts
+  copy:
+    src: "{{ playbook_dir }}/../infra-scripts/wordpress/{{ item }}"
+    dest: "/opt/infra-scripts/wordpress/{{ item }}"
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - install_wp.sh
+    - uninstall_wp.sh
+    - setup_wp.sh
+    - cleanup_wp.sh
+
+- name: Deploy Cloudflare scripts
+  copy:
+    src: "{{ playbook_dir }}/../infra-scripts/cloudflare/{{ item }}"
+    dest: "/opt/infra-scripts/cloudflare/{{ item }}"
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - create_cf_sub_auto.sh
+    - delete_cf_sub.sh
+
+- name: Create symlinks to all scripts
+  file:
+    src: "/opt/infra-scripts/wordpress/{{ item.src }}"
+    dest: "/usr/local/bin/{{ item.dest }}"
+    state: link
+    owner: root
+    group: root
+  loop:
+    - { src: "install_wp.sh", dest: "install_wp" }
+    - { src: "uninstall_wp.sh", dest: "uninstall_wp" }
+    - { src: "setup_wp.sh", dest: "setup_wp" }
+    - { src: "cleanup_wp.sh", dest: "cleanup_wp" }
+    - { src: "../cloudflare/create_cf_sub_auto.sh", dest: "create_cf_sub_auto" }
+    - { src: "../cloudflare/delete_cf_sub.sh", dest: "delete_cf_sub" }
+
+- name: Create pullinfra command
+  copy:
+    dest: /usr/local/bin/pullinfra
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      cd /opt/infra-scripts && git pull origin main
+      cd /opt/infra-playbooks && git pull origin main
+    owner: root
+    group: root
+    mode: '0755'

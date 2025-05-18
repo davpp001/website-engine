@@ -1,4 +1,4 @@
-# website-engine-infra-scripts
+# infra-scripts
 
 Dieses Repository enthält alle Shell-Skripte und Konfigurationshilfen zur automatisierten Bereitstellung von WordPress-Instanzen auf Subdomains – inklusive DNS-Einrichtung über Cloudflare, Wildcard-SSL-Zertifikat, Apache-Vhost und WordPress-Vorkonfiguration.
 

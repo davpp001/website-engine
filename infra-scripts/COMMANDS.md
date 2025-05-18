@@ -1,4 +1,4 @@
-# website-engine-infra-scripts – Kommandos
+# infra-scripts – Kommandos
 
 Diese Datei enthält alle wichtigen Shell-Befehle zur Verwaltung des Systems (Subdomain-Erstellung, WordPress-Provisionierung, Git-Synchronisierung etc.).
 

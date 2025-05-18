@@ -1,5 +1,8 @@
 - hosts: ubuntu
   become: true
+  
+  roles:
+    - website-scripts
 
   vars:
     # DocumentRoot und API-Pfad
@@ -243,7 +246,7 @@
         content: |
           #!/usr/bin/env bash
           source /etc/restic.env
-          restic backup /etc /opt/infra-playbooks /var/www
+          restic backup /etc /opt/infra-playbooks /opt/infra-scripts /var/www
           restic forget --keep-daily 14 --keep-weekly 4 --prune
         mode: '0755'
 

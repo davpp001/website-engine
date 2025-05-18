@@ -1,0 +1,13 @@
+# OS- und Editor-Dateien
+.DS_Store
+Thumbs.db
+
+# Logs, temporäre Dateien
+*.log
+/tmp/
+
+# SSH-Keys und Tokens
+*.pem
+*.key
+*token*
+.env

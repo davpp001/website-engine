@@ -1,0 +1,44 @@
+# roles/api/tasks/main.yml
+- name: Ensure API directory exists
+  file:
+    path: "{{ api_path }}"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: '0755'
+
+- name: Deploy Setup-API trigger script
+  copy:
+    src: files/trigger-setup.php
+    dest: "{{ api_path }}/trigger-setup.php"
+    owner: www-data
+    group: www-data
+    mode: '0640'
+
+- name: Deploy webhook wrapper
+  copy:
+    dest: /usr/local/bin/setup_wp_webhook.sh
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      source /etc/setup_wp.env
+      exec /usr/local/bin/setup_wp "$@"
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Ensure webhook wrapper is setuid-root
+  file:
+    path: /usr/local/bin/setup_wp_webhook.sh
+    owner: root
+    group: root
+    mode: '4750'
+
+- name: Ensure sudoers entry for webhook wrapper
+  copy:
+    dest: /etc/sudoers.d/setup_wp_webhook
+    content: |
+      www-data ALL=(root) NOPASSWD: /usr/local/bin/setup_wp_webhook.sh
+    owner: root
+    group: root
+    mode: '0440'

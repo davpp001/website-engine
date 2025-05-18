@@ -1,0 +1,262 @@
+- hosts: ubuntu
+  become: true
+
+  vars:
+    # DocumentRoot und API-Pfad
+    prod_docroot: /var/www/s-neue.website/html
+    api_path: "{{ prod_docroot }}/api"
+
+    # Secrets für den PHP-Webhook und Cloudflare
+    webhook_secret: "mein-geheimes-webhook-token-123"
+    cf_api_token:    "lLrGrv3Q8hmj-Db4ncotnGqbaE0IFX9oKvD8yxQV"
+    zone_id:         "d7e5b4cfe310063ede065b1ba06bcdf7"
+    domain:          "s-neue.website"
+
+  pre_tasks:
+    - name: Ensure Apache, UFW & Certbot are installed
+      apt:
+        name:
+          - apache2
+          - ufw
+          - certbot
+          - python3-certbot-apache
+        state: present
+        update_cache: yes
+
+    - name: Ensure UFW allows HTTP and HTTPS
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+      loop:
+        - '80'
+        - '443'
+
+    - name: Enable UFW
+      ufw:
+        state: enabled
+
+    - name: Ensure production DocumentRoot exists
+      file:
+        path: "{{ prod_docroot }}"
+        state: directory
+        owner: www-data
+        group: www-data
+        mode: '0755'
+
+  tasks:
+    - name: Deploy production vHost for s-neue.website
+      copy:
+        dest: /etc/apache2/sites-available/s-neue.website.conf
+        content: |
+          <VirtualHost *:80>
+            ServerName s-neue.website
+            DocumentRoot {{ prod_docroot }}
+            RewriteEngine On
+            RewriteRule ^ https://%{SERVER_NAME}%{REQUEST_URI} [L,R=301]
+          </VirtualHost>
+
+          <VirtualHost *:443>
+            ServerName s-neue.website
+            DocumentRoot {{ prod_docroot }}
+
+            SSLEngine on
+            SSLCertificateFile    /etc/letsencrypt/live/s-neue.website/fullchain.pem
+            SSLCertificateKeyFile /etc/letsencrypt/live/s-neue.website/privkey.pem
+
+            <Directory {{ prod_docroot }}>
+              AllowOverride All
+              Require all granted
+            </Directory>
+
+            Alias /api/ {{ api_path }}/
+            <Directory {{ api_path }}>
+              AllowOverride None
+              Require all granted
+            </Directory>
+          </VirtualHost>
+      notify: Reload Apache
+
+    - name: Enable production vHost
+      command: a2ensite s-neue.website.conf
+      args:
+        creates: /etc/apache2/sites-enabled/s-neue.website.conf
+      notify: Reload Apache
+
+    - name: Ensure API directory exists
+      file:
+        path: "{{ api_path }}"
+        state: directory
+        owner: www-data
+        group: www-data
+        mode: '0755'
+
+    - name: Deploy Setup-API trigger script
+      copy:
+        src: roles/api/files/trigger-setup.php
+        dest: "{{ api_path }}/trigger-setup.php"
+        owner: www-data
+        group: www-data
+        mode: '0640'
+      notify: Reload Apache
+
+    - name: Deploy webhook secret file
+      copy:
+        dest: /etc/webhook.secret
+        content: "{{ webhook_secret }}"
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Deploy API-Alias conf
+      copy:
+        dest: /etc/apache2/conf-available/api-alias.conf
+        content: |
+          Alias /api/ {{ api_path }}/
+          <Directory {{ api_path }}>
+            Require all granted
+          </Directory>
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Reload Apache
+
+    - name: Enable API-Alias conf
+      command: a2enconf api-alias
+      args:
+        creates: /etc/apache2/conf-enabled/api-alias.conf
+      notify: Reload Apache
+
+    - name: Deploy setup_wp env file for Cloudflare
+      copy:
+        dest: /etc/setup_wp.env
+        content: |
+          CF_API_TOKEN="{{ cf_api_token }}"
+          ZONE_ID="{{ zone_id }}"
+          DOMAIN="{{ domain }}"
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Deploy setup_wp webhook wrapper
+      copy:
+        dest: /usr/local/bin/setup_wp_webhook.sh
+        content: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          source /etc/setup_wp.env
+          exec /usr/local/bin/setup_wp "$@"
+        owner: root
+        group: root
+        mode: '0750'
+
+    - name: Allow www-data to run webhook wrapper via sudo
+      copy:
+        dest: /etc/sudoers.d/setup_wp_webhook
+        content: "www-data ALL=(root) NOPASSWD: /usr/local/bin/setup_wp_webhook.sh"
+        owner: root
+        group: root
+        mode: '0440'
+
+    - name: Ensure MySQL backup directory exists
+      file:
+        path: /var/backups/mysql
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Schedule daily MySQL dump at 03:00
+      cron:
+        name: "daily mysql backup"
+        minute: "0"
+        hour: "3"
+        job: "mysqldump --single-transaction --routines --events --all-databases | gzip > /var/backups/mysql/backup-$(date +\\%F).sql.gz"
+        user: root
+
+    - name: Remove MySQL backups older than 14 days
+      cron:
+        name: "cleanup old mysql backups"
+        minute: "0"
+        hour: "4"
+        job: "find /var/backups/mysql -type f -mtime +14 -name '*.gz' -delete"
+        user: root
+
+    - name: Ensure snapshot script directory exists
+      file:
+        path: /usr/local/bin
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Deploy IONOS snapshot script
+      copy:
+        dest: /usr/local/bin/ionos-snapshot.sh
+        content: |
+          #!/usr/bin/env bash
+          export IONOS_TOKEN="{{ ionos_token }}"
+          DATACENTER_ID="{{ datacenter_id }}"
+          VOLUME_ID="{{ volume_id }}"
+          curl -s -X POST \
+            "https://api.ionos.com/cloudapi/v6/datacenters/${DATACENTER_ID}/volumes/${VOLUME_ID}/create-snapshot" \
+            -H "Authorization: Bearer ${IONOS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"properties\":{\"name\":\"snapshot-$(date +%F)\"}}"
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Schedule daily IONOS snapshot at 01:00
+      cron:
+        name: "daily ionos snapshot"
+        minute: "0"
+        hour: "1"
+        job: "/usr/local/bin/ionos-snapshot.sh"
+        user: root
+
+    - name: Download Restic
+      get_url:
+        url: https://github.com/restic/restic/releases/download/v0.18.0/restic_0.18.0_linux_amd64.bz2
+        dest: /tmp/restic.bz2
+
+    - name: Install Restic if new
+      shell: |
+        bunzip2 /tmp/restic.bz2
+        mv /tmp/restic /usr/local/bin/restic
+        chmod +x /usr/local/bin/restic
+      args:
+        creates: /usr/local/bin/restic
+
+    - name: Write Restic env file
+      copy:
+        dest: /etc/restic.env
+        content: |
+          export RESTIC_REPOSITORY={{ restic_repo }}
+          export RESTIC_PASSWORD={{ restic_password }}
+          export AWS_ACCESS_KEY_ID={{ restic_access_key }}
+          export AWS_SECRET_ACCESS_KEY={{ restic_secret_key }}
+        mode: '0600'
+
+    - name: Deploy Restic backup script
+      copy:
+        dest: /usr/local/bin/restic-backup.sh
+        content: |
+          #!/usr/bin/env bash
+          source /etc/restic.env
+          restic backup /etc /opt/infra-playbooks /var/www
+          restic forget --keep-daily 14 --keep-weekly 4 --prune
+        mode: '0755'
+
+    - name: Schedule daily Restic backup at 02:30
+      cron:
+        name: "daily restic backup"
+        minute: "30"
+        hour: "2"
+        job: "/usr/local/bin/restic-backup.sh"
+        user: root
+
+  handlers:
+    - name: Reload Apache
+      service:
+        name: apache2
+        state: reloaded
